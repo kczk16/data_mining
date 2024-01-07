@@ -1,0 +1,791 @@
+---
+title: "Data mining"
+subtitle: "Project part 1 and 2"
+author:
+- Beata Paszkowska
+- Karolina Ostrowska
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: pdf_document
+fig_width: 7
+fig_height: 6
+fig_caption: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
+```
+
+## Problem description
+For this project, we analyze the Churn data set. The term "churn" is used to describe customer dropping services of one company in favor of the other. 
+
+We want to inspect what factors matters in terms of churning. By finding patterns and figuring out which variables are significant, we hope to create a prediction model that will help minimize the amount of customers churning.
+
+
+## Data characteristics
+The set contains details about 3333 customers, for each of them there are gathered 20 predictors as well as information if they churned.
+
+Looking at our data below, we can see they are mostly continuous. There are two binary columns - International Plan and Voice Mail Plan. 
+
+```{r data, echo=FALSE}
+#rm(list = ls(all.names = TRUE))
+data <- read.csv2(file="/Users/kczk/Desktop/data mining/churn_data.txt", stringsAsFactors = TRUE, sep = ",")
+```
+\newpage
+```{r types}
+head(data)
+sapply(data, class)
+```
+
+Firstly, we check if the types of data are properly recognized and changed them accordingly if needed. We also drop columns "State" and "Phone" as it most probably won't give much insight into our analysis.
+```{r changetypes, echo=FALSE}
+data <- subset(data, select = -c(State, Phone))
+data$Night.Mins <- as.numeric(as.character(data$Night.Mins))
+data$Day.Mins <- as.numeric(as.character(data$Day.Mins))
+data$Eve.Mins <- as.numeric(as.character(data$Eve.Mins))
+data$Area.Code <- as.character(data$Area.Code)
+data$Day.Charge <- as.numeric(as.character(data$Day.Charge))
+data$Eve.Charge <- as.numeric(as.character(data$Eve.Charge))
+data$Night.Charge <- as.numeric(as.character(data$Night.Charge))
+data$Intl.Mins <- as.numeric(as.character(data$Intl.Mins))
+data$Intl.Charge <- as.numeric(as.character(data$Intl.Charge))
+data$Intl.Calls <- as.numeric(as.character(data$Intl.Calls))
+#data$Int.l.Plan <- as.numeric(data$Int.l.Plan)
+#data$VMail.Plan <- as.numeric(data$VMail.Plan)
+# TO SKOPIOWAC I ODKOMENTOWAC DO MODELI!!!
+#detach(data)
+attach(data)
+```
+\newpage
+After such cleaning, data's metrics presents as fallows:
+```{r changedtypes}
+sapply(data, class)
+```
+
+```{r lib, echo=FALSE, include=FALSE}
+library(DataExplorer)
+library(ggthemes)
+```
+
+```{r intro, echo=FALSE}
+plot_intro(data, ggtheme = theme_tufte())
+```
+There is no missing observation and all the rows are complete. As we noticed before, over three fourth of data are continuous, with only 21% of them being discrete.
+
+\newpage
+Here we can see basics statistics for each column. We can mark that almost in every case the median is very close to mean. The average amount of calls doesn't really depend on the time of day, but they tend to be a bit shorter during day than evening and night.
+```{r summary}
+summary(data)
+```
+
+\newpage
+## Plots
+
+The data mostly consists of the cases in which customer didn't churn. We also see that both international and voice mail plan isn't a common thing for clients. 
+
+Something we noted is that there are only 3 area codes, even though there were a lot of different states.
+
+```{r bar, echo=FALSE}
+plot_bar(data, ggtheme = theme_tufte(), title = "Barplots for categorical data")
+```
+
+For continuous data, we plotted histograms and QQ plots:
+```{r hist, echo=FALSE, fig.align = "center"}
+plot_histogram(data, ggtheme = theme_tufte(), title = "Histograms for numeric data")
+```
+\newpage
+```{r qq, echo=FALSE}
+plot_qq(data, ggtheme = theme_tufte(), title = "QQ plots")
+```
+The majority of them is normally distributed with exception to Customer Service Calls, International Calls and Voice Mail Message.
+
+
+Next we check correlations in order to finally start distinguishing which variables may be useful in creating prediction models.
+```{r corr, echo=FALSE, fig.align = "center"}
+plot_correlation(data, ggtheme = theme_tufte(), title = "Correlation matrix")
+```
+Of course, we immediately see that strong correlation between charge and minutes of a respective time of day exist. What is of most interest for us is the connection of data to churn, and it is present with both international and voice mail plan as well as with amount of customer service calls, voice mail messages and minutes.
+
+
+```{r boxplot, echo=FALSE}
+plot_boxplot(data, by="Churn.", ggtheme = theme_tufte(), 
+             title = "Boxplots by churn")
+```
+On boxplots we can see where are the biggest differences in data split by churn. For example, boxplot for Customer Service Calls with Churn = 'True' has bigger box and greater median, what can lead us to the conclusion that this characteristic has an impact on churn variable. We can see similar dependences as in correlation matrix.
+
+We will now focus more on the variables that have some correlation with the churn, starting with minutes of calls for day, evening and night.
+```{r histograms, echo=FALSE, fig.align = "center"}
+library(ggplot2)
+library(egg)
+
+hist_day <- ggplot(data, aes(x = Day.Mins, fill = Churn.)) +
+  geom_histogram(binwidth = 15, color="#e9ecef") + 
+  labs(x = "Mins", title = "Histogram for Day data")
+
+hist_eve <- ggplot(data, aes(x = Eve.Mins, fill = Churn.)) +
+  geom_histogram(binwidth = 15, color="#e9ecef") + 
+  labs(x = "Mins", title = "Histogram for Eve data")
+
+hist_night <- ggplot(data, aes(x = Night.Mins, fill = Churn.)) +
+  geom_histogram(binwidth = 15, color="#e9ecef") + 
+  labs(x = "Mins", title = "Histogram for Night data")
+
+ggarrange(hist_day, hist_eve, hist_night,
+          ncol = 2, nrow = 2)
+
+```
+From looking at the above histograms, it appears that clients with high day minutes tends to churn more often. To see more clearly, we will "normalize" the histograms so all the bars are of the same length, so we can see the proportion much better.
+
+```{r sukces, echo=FALSE, warning = FALSE, fig.width=10,fig.height=7}
+hist_day <- ggplot(data, aes(x = Day.Mins, fill = Churn.)) +
+  geom_histogram(binwidth = 15, color="#e9ecef", position = "fill") + 
+  labs(x = "Mins", y = "Percent", title = "Normalized histogram for Day data")
+
+hist_eve <- ggplot(data, aes(x = Eve.Mins, fill = Churn.)) +
+  geom_histogram(binwidth = 15, color="#e9ecef", position = "fill") + 
+  labs(x = "Mins", y = "Percent", title = "Normalized histogram for Eve data")
+
+hist_night <- ggplot(data, aes(x = Night.Mins, fill = Churn.)) +
+  geom_histogram(binwidth = 15, color="#e9ecef", position = "fill") + 
+  labs(x = "Mins",  y = "Percent", title = "Normalized histogram for Night data")
+
+ggarrange(hist_day, hist_eve, hist_night,
+          ncol = 2, nrow = 2)
+
+```
+Now it is very clear that customers with high amount of day minutes have higher rate of churn and should definitively be used in our model as a predictor.
+From the company perspective, it could be useful to monitor those users and pay them special care to potentially prevent churn.
+The situation isn't that extreme when it comes to evening minutes, but still there is an increase in churn percentage after reaching 300 minutes, so we can still include it in the prediction model. For night minutes, there is no visible trend.
+
+
+We examine the amount of customer service calls in a similar manner.
+The higher number of calls corresponds to a much higher rate of churning. It is to be expected because as the more a client have problems that are not resolve quickly with one to three calls the more dissatisfy they are with the service and want to change them.
+\newpage
+```{r sukceshist, echo=FALSE, fig.width=5,fig.height=7}
+hist_cust <- ggplot(data, aes(x = CustServ.Calls, fill = Churn.)) +
+  geom_histogram(binwidth = 1, color="#e9ecef") + 
+  labs(x = "Number of calls", title = "Histogram for Customer Service Calls")
+hist_cust2 <- ggplot(data, aes(x = CustServ.Calls, fill = Churn.)) +
+  geom_histogram(binwidth = 1, color="#e9ecef", position = "fill") + 
+  labs(x = "Number of calls", y = "Percent", title = "Normalized histogram for Customer Service Calls")
+
+ggarrange(hist_cust, hist_cust2,
+          ncol = 1, nrow = 2)
+
+```
+
+At last, we focus on different plans customer can obtain - international and voice mail.
+Those having an international plan are more than three times more likely to churn than those who don't. We can speculate that maybe the plan isn't attractive in comparison to the ones at some other company. 
+```{r sukces2, echo=FALSE, , fig.width=5,fig.height=7}
+hist_plan <- ggplot(data, aes(x = Int.l.Plan, fill = Churn.)) +
+  geom_bar(color="#e9ecef", position = "fill") + 
+  labs(x = "International Plan", y = "Percent", title = "International Plan by Churn")
+
+hist_vmplan <- ggplot(data, aes(x = VMail.Plan, fill = Churn.)) +
+  geom_bar(color="#e9ecef", position = "fill") + 
+  labs(x = "Voice Mail Plan",  y = "Percent", title = "Voice Mail Plan by Churn")
+
+ggarrange(hist_plan, hist_vmplan,
+          ncol = 1, nrow = 2)
+
+```
+The case with voice mail plan is quite the opposite. Clients who don't have it are approximately two times more likely to churn. 
+
+It would be wise for the company to pay close attention to those offers and try to identify problems with them to decrease the churning rate.
+We will use both of those variables as predictor in our models.
+
+\newpage
+## Classification
+In our classification models, we used examined above variables that stand out with high correlation with churn and showed they play part in clients' decision to churn. We ended up with 7 predictors, and they are as follows:
+```{r data2, echo = FALSE}
+col_order <- c("Int.l.Plan", "VMail.Plan", "VMail.Message",
+               "Day.Mins", "Eve.Mins", "Intl.Mins", 
+               "CustServ.Calls")
+data2 <- data[, col_order]
+
+data2$Int.l.Plan <- as.numeric(as.numeric(data2$Int.l.Plan))
+data2$VMail.Plan <- as.numeric(as.numeric(data2$VMail.Plan))
+```
+
+```{r data2head}
+head(data2)
+```
+We used 4 different methods for classification: linear regression, k-nearest neighbors, linear and quadratic discriminant analysis.
+
+## Linear Regression
+Firstly, we split our data into learning set and test set. We used one third of the data as a learning set and the rest to test the models.
+```{r order column, echo=FALSE, include=FALSE}
+
+class.labels <- data$Churn.
+(n <- length(class.labels))
+
+n_train <- 1111
+class.labels.train <- class.labels[1:n_train]
+(K <- length(levels(class.labels.train)))
+
+X <- cbind(rep(1,n_train), data2[1:n_train, ])
+X <- as.matrix(X)
+
+#### test ####
+n_test <- 3333 - n_train
+class.labels.test <- class.labels[(n_train+1):3333]
+(K_test <- length(levels(class.labels.test)))
+
+X_test <- cbind(rep(1,n_test), data2[(n_train+1):3333, ])
+X_test <- as.matrix(X_test)
+```
+
+```{r Ymodel, echo=FALSE}
+Y <- matrix(0, nrow=n_train, ncol=K)
+Y_test <- matrix(0, nrow=n_test, ncol=K_test)
+labels.num <- as.numeric(class.labels.train)
+labels.num.test <- as.numeric(class.labels.test)
+
+for (k in 1:K)  
+  Y[labels.num==k, k] <- 1
+
+for (k in 1:K_test)  
+  Y_test[labels.num.test==k, k] <- 1
+```
+To get the coefficients for regression, we solve the equation using learning data. We check how well the model is doing on training data and then on the test set.
+```{r solve}
+model <- solve(t(X)%*%X) %*% t(X) %*% Y
+
+Y.hat <- X%*%model
+Y.hat.test <- X_test%*%model
+```
+
+```{r cg2, echo=FALSE}
+classes <- levels(class.labels.train)
+classes_test <- levels(class.labels.test)
+
+maks.ind <- apply(Y.hat, 1, FUN=function(x) which.max(x))
+maks.ind.test <- apply(Y.hat.test, 1, FUN=function(x) which.max(x))
+
+predicted.labels <- classes[maks.ind]
+
+predicted.labels.test <- classes_test[maks.ind.test]
+
+real.labels <- class.labels.train
+real.labels.test <- class.labels.test
+```
+
+```{r bledy, echo=FALSE}
+# confusion matrix
+confusion.matrix <- table(real.labels, predicted.labels)
+confusion.matrix
+
+sum(diag(confusion.matrix))/n_train
+
+# confusion matrix test
+confusion.matrix.test <- table(real.labels.test, predicted.labels.test)
+confusion.matrix.test
+
+sum(diag(confusion.matrix.test))/n_test
+```
+From the confusion matrices, we see that the model handles the cases of churning really well, while it struggles to correctly distinguish true cases. 
+
+Nevertheless, it reaches accuracy grater than 80% for both training set and test set, which is a quite good result.
+
+## k-NN
+
+```{r kNN, echo=FALSE, include=FALSE}
+library(ipred)
+
+n <- dim(data)[1]
+learning.set.index <- sample(1:n,2/3*n)
+
+learning.set <- data[learning.set.index,]
+test.set     <- data[-learning.set.index,]
+real.labels.knn.train <- learning.set$Churn.
+real.labels.knn <- test.set$Churn.
+```
+
+```{r knnmodel}
+#first kNN model, k = 5
+model.knn.1 <- ipredknn(Churn. ~ Int.l.Plan+VMail.Plan+VMail.Message+Day.Mins
++Eve.Mins+Night.Mins+Intl.Mins+CustServ.Calls, data=learning.set, k=5)
+
+predicted.labels.knn.train <- predict(model.knn.1,learning.set, type="class")
+predicted.labels.knn <- predict(model.knn.1,test.set, type="class")
+
+#second kNN model, k = 10
+model.knn.2 <- ipredknn(Churn. ~ Int.l.Plan+VMail.Plan+VMail.Message+Day.Mins
++Eve.Mins+Night.Mins+Intl.Mins+CustServ.Calls, data=learning.set, k=10)
+
+predicted.labels.knn.train2 <- predict(model.knn.2,learning.set, type="class")
+predicted.labels.knn2 <- predict(model.knn.2,test.set, type="class")
+```
+
+```{r conmatknn, echo=FALSE, include=FALSE}
+# confusion matrix
+(confusion.matrix.knn.train <- table(predicted.labels.knn.train, real.labels.knn.train))
+(confusion.matrix.knn <- table(predicted.labels.knn, real.labels.knn))
+
+# confusion matrix2
+(confusion.matrix.knn.train2 <- table(predicted.labels.knn.train2, real.labels.knn.train))
+(confusion.matrix.knn2 <- table(predicted.labels.knn2, real.labels.knn))
+
+# misclassification error
+n.train <- dim(learning.set)[1]
+n.test <- dim(test.set)[1]
+```
+Results for k = 5 (training set, test set):
+```{r accu knn, echo=FALSE}
+(sum(diag(confusion.matrix.knn.train))) / n.train
+(sum(diag(confusion.matrix.knn))) / n.test
+```
+Results for k = 10 (training set, test set):
+```{r accu knn2, echo=FALSE}
+(sum(diag(confusion.matrix.knn.train2))) / n.train
+(sum(diag(confusion.matrix.knn2))) / n.test
+```
+With k-NN method, we tested 2 models, for k=5 and k=10. The results were better than in case of regression. For both models, the accuracy was almost equal to 90% for both learning and test set.
+
+
+```{r cv, echo=FALSE}
+#### cv and boot
+library(ipred)
+my.predict  <- function(model, newdata) predict(model, newdata=newdata, type="class")
+my.ipredknn <- function(formula1, data1, n.of.neighbors) ipredknn(formula=formula1,data=data1,k=n.of.neighbors)
+
+# classification errors: cv, boot
+errorest(Churn. ~ Int.l.Plan+VMail.Plan+VMail.Message+Day.Mins
+         +Eve.Mins+Night.Mins+Intl.Mins+CustServ.Calls, data, 
+         model=my.ipredknn, predict=my.predict, estimator="cv",     
+         est.para=control.errorest(k = 10), n.of.neighbors=5)
+
+errorest(Churn. ~ Int.l.Plan+VMail.Plan+VMail.Message+Day.Mins
+         +Eve.Mins+Night.Mins+Intl.Mins+CustServ.Calls, data, 
+         model=my.ipredknn, predict=my.predict, estimator="boot",   
+         est.para=control.errorest(nboot = 50), n.of.neighbors=5)
+```
+We also did cross-validation and bootstrap-based procedure for model with k=5. They both yield misclassification error not greater than 0.15.
+
+## LDA
+```{r lda, echo=FALSE, include=FALSE}
+library(MASS)
+n <- 3333
+prop <- 2/3
+
+learning.indx <- sample(1:n, prop*n)
+learning.set <- data[learning.indx,]
+test.set <- data[-learning.indx,]
+```
+
+```{r ldamodel}
+data.lda  <- lda(Churn. ~ Int.l.Plan+VMail.Plan+VMail.Message+Day.Mins
+                  +Eve.Mins+Night.Mins+Intl.Mins
+                 +CustServ.Calls, data=data, subset=learning.indx)
+```
+
+```{r ldapred, echo=FALSE, include=FALSE}
+(prediction.lda  <-  predict(data.lda, test.set))
+(pred.prob.lda <- prediction.lda$posterior)
+(pred.labels.lda <- prediction.lda$class)
+
+real.labels <- data$Churn.[-learning.indx]
+
+(conf.mat.lda <- table(pred.labels.lda, real.labels))
+
+n.test <- dim(test.set)[1] 
+```
+Error values for LDA:
+```{r errorslda, echo=FALSE}
+(error.lda <- (n.test-sum(diag(conf.mat.lda)))/n.test)
+```
+
+```{r cvboot, echo=FALSE}
+my.predict  <- function(model, newdata) (predict(model, newdata=newdata))$class
+my.ipred.lda <- function(formula1, data1) lda(formula=formula1,data=data1)
+
+errorest(Churn. ~ Int.l.Plan+VMail.Plan+VMail.Message+Day.Mins
+         +Eve.Mins+Night.Mins+Intl.Mins+CustServ.Calls, data, 
+         model=my.ipred.lda, predict=my.predict, estimator="cv",     
+         est.para=control.errorest(k = 10))
+
+errorest(Churn. ~ Int.l.Plan+VMail.Plan+VMail.Message+Day.Mins
+         +Eve.Mins+Night.Mins+Intl.Mins+CustServ.Calls, data, 
+         model=my.ipred.lda, predict=my.predict, estimator="boot",   
+         est.para=control.errorest(nboot = 50))
+```
+The LDA model got us similar results as the regression model. The misclassification error calculated from confusion matrix equaled around 15%, and the ones from cross-validation and bootstrap were also close to 15%.
+
+## QDA
+```{r qda, echo=FALSE, include=FALSE}
+n <- 3333
+prop <- 2/3
+data$Int.l.Plan <- as.character(data$Int.l.Plan)
+data$VMail.Plan <- as.character(data$VMail.Plan)
+
+learning.indx <- sample(1:n, prop*n)
+learning.set <- data[learning.indx,]
+test.set <- data[-learning.indx,]
+```
+
+```{r qdamodel}
+data.qda  <- qda(Churn. ~ Int.l.Plan+VMail.Plan+VMail.Message+Day.Mins
+                 +Eve.Mins+Night.Mins+Intl.Mins
+                 +CustServ.Calls, data=data, subset=learning.indx)
+```
+
+```{r qdamodel2, echo=FALSE, include=FALSE}
+prediction.qda  <-  predict(data.qda, test.set)
+
+(pred.labels.qda <- prediction.qda$class)
+(conf.mat.qda <- table(pred.labels.qda, real.labels))
+```
+Error values for QDA:
+```{r errors qda, echo=FALSE}
+(error.qda <- (n.test-sum(diag(conf.mat.qda)))/n.test)
+```
+
+```{r errors qda2, echo=FALSE}
+my.predict  <- function(model, newdata) (predict(model, newdata=newdata))$class
+my.ipred.qda <- function(formula1, data1) qda(formula=formula1,data=data1)
+
+errorest(Churn. ~ Int.l.Plan+VMail.Plan+VMail.Message+Day.Mins
+         +Eve.Mins+Night.Mins+Intl.Mins+CustServ.Calls, data, 
+         model=my.ipred.qda, predict=my.predict, estimator="cv",     
+         est.para=control.errorest(k = 10))
+
+errorest(Churn. ~ Int.l.Plan+VMail.Plan+VMail.Message+Day.Mins
+         +Eve.Mins+Night.Mins+Intl.Mins+CustServ.Calls, data, 
+         model=my.ipred.qda, predict=my.predict, estimator="boot",   
+         est.para=control.errorest(nboot = 50))
+
+
+```
+The QDA model made the worst predictions. Error from confusion matrix equaled almost 25%. It is interesting that the errors from cross-validation and bootstrap were smaller and similar to those from others models, as they were around 13%.
+
+\newpage
+## Summary, part 1
+From the conducted analysis, we learned a couple of things. We identify factors that affect churning of customers. The amount of minutes that client spends at calling are one of those. The percentage of churn increase with high amount of minutes, especially at day, and company should monitor it and when it exceeds 200 they should pay more care to those customers, maybe propose them a better offer. 
+The number of customer service calls is also important. After more than 3 calls, the company should contact the client and give special treatment to gain their loyalty, as the probability of churning grows rapidly. 
+The international plan seems to be unattractive and be one of the cause of churning. It can be a good idea to revise it. In contradiction the voice mail plan makes customer stay in present company so better advertisement for this offer can be tactical.
+
+To help predict whether client will churn or not we created 4 classification models - linear regression, k-nearest neighbors, LNA and QDA. It turns out that the best was k-NN model with almost 90% accuracy. The rest were also quite good as they reached more than 80% accuracy, except for QDA model which had accuracy of about 75%. We still can consider it as a success and conclude that our analysis of data was good, and we pinpoint important factors well.
+
+\newpage
+## Project - part 2
+```{r data clu, echo=FALSE}
+rm(list = ls(all.names = TRUE))
+data <- read.csv2(file="/Users/kczk/Desktop/data mining/churn_data.txt", stringsAsFactors = TRUE, sep = ",")
+data$Night.Mins <- as.numeric(as.character(data$Night.Mins))
+data$Day.Mins <- as.numeric(as.character(data$Day.Mins))
+data$Eve.Mins <- as.numeric(as.character(data$Eve.Mins))
+data$Area.Code <- as.numeric(as.character(data$Area.Code))
+data$Day.Charge <- as.numeric(as.character(data$Day.Charge))
+data$Eve.Charge <- as.numeric(as.character(data$Eve.Charge))
+data$Night.Charge <- as.numeric(as.character(data$Night.Charge))
+data$Intl.Mins <- as.numeric(as.character(data$Intl.Mins))
+data$Intl.Charge <- as.numeric(as.character(data$Intl.Charge))
+data$Int.l.Plan <- as.numeric(data$Int.l.Plan)
+data$VMail.Plan <- as.numeric(data$VMail.Plan)
+
+col_order <- c("VMail.Message", "Day.Mins", "Eve.Mins", "Night.Mins", "Intl.Mins")
+data.clu <- data[, col_order]
+attach(data)
+churn.features <- as.data.frame(scale(data.clu))
+```
+
+For the cluster analysis, we remove binary data from features we previously chose for classification and standardize the remaining 5 attributes.
+```{r cluster data head}
+head(churn.features)
+```
+
+```{r python, echo=FALSE, include=FALSE}
+library(reticulate)
+library(Rcpp)
+use_python('/Users/kczk/opt/anaconda3/bin/python', required = T)
+
+sns <- import('seaborn')
+plt <- import('matplotlib.pyplot')
+pd <- import('pandas')
+data.py <- cbind(churn.features, data$Churn.)
+```
+
+```{r python plot, echo=FALSE}
+sns$pairplot(r_to_py(data.py), hue = 'data$Churn.')
+plt$savefig('/Users/kczk/Desktop/data mining/pairplot.png')
+```
+```{r ocochodzi, out.width = "400px"}
+knitr::include_graphics('/Users/kczk/Desktop/data mining/pairplot.png')
+```
+
+To see the nature of our data, we visualize them using a pair plot for each feature with distinction of churn.
+It is visible that in every case data has no amount of separation or distinct groups, so we can already suspect they are not well suited for clustering.
+Nevertheless, we choose to see how it will preform in case of Eve.Mins and Day.Mins as we can see some kind of distinction between churn and not churn clients.
+
+\newpage
+## Finding clusters number
+Firstly, we check the optimal number of clusters.
+
+```{r cluster libs, echo=FALSE, include=FALSE}
+library(factoextra)
+library(NbClust)
+library(stats)
+library(e1071)
+library(cluster)
+```
+
+```{r elbow, echo=FALSE, fig.width=6, fig.height=6}
+# Elbow method
+fviz_nbclust(churn.features, kmeans, method = "wss") +
+  geom_vline(xintercept = 3, linetype = 3)+
+  labs(subtitle = "Elbow method")
+
+```
+\newpage
+```{r silu, echo=FALSE, fig.width=6, fig.height=6, message=FALSE}
+
+# Silhouette method
+fviz_nbclust(churn.features, kmeans, method = "silhouette")+
+  labs(subtitle = "Silhouette method")
+```
+\newpage
+```{r gaps, echo=FALSE, fig.width=6, fig.height=6, results='hide',fig.keep='all', message=FALSE, warning=FALSE}
+# Gap statistic
+fviz_nbclust(churn.features, kmeans, method = "gap")+
+  labs(subtitle = "Gap statistic method")
+```
+
+
+For both elbow and silhouette methods, we obtain k=3, which is really not ideal in our case of churn classification. Gap statistic method yields k=1, as there are no visible groups forming in our data, it makes sense and supports the conclusion that we may not get any satisfactory results.
+
+## Cluster analysis
+We will examine clusters for both k=3, as was suggested from our analysis, and k=2 as in reality we only have two groups we want to classify: churn and not churn.
+
+## k-means method
+### k=2
+```{r kmeans k2}
+k <- 2
+kmeans.k2 <- kmeans(churn.features, centers=k, iter.max=10, nstart=10)
+churn.kmeans.labels <- kmeans.k2$cluster
+```
+With k-means method we obtain 2 clusters presented at below plot.
+The two groups are mixed together and there is no significant disparity. We can however look at how it managed matching classes in reference to real labels.
+
+
+```{r kmeans plot, echo=FALSE, fig.width=4, fig.height=4}
+plot(churn.features$Day.Mins, churn.features$Eve.Mins, col=churn.kmeans.labels, pch=as.numeric(data$Churn.))
+title ("k-means clustering \n color -  k-means labels, symbol - real class labels")
+```
+\bigskip
+
+In data, the proportion of clients churning to not looks as follows:
+```{r accurate data check k2, echo=FALSE}
+table(data$Churn.)
+```
+Matching classes of clusters and real data, we get only 63.49% accuracy. The size of created clusters is not the worst, but as we can see from confusion matrix, most of the correct predictions come from not churning clients. With that method, we don't identify most cases of churning.
+```{r accu check k2, echo=FALSE}
+table(data$churn.)
+(tab <- table(kmeans.k2$cluster, as.numeric(data$Churn.)))
+matchClasses(tab, method="exact")
+compareMatchedClasses(kmeans.k2$cluster, as.numeric(data$Churn.), method="exact")$diag
+```
+
+
+### k=3
+```{r kmeans k3}
+set.seed(123)
+k <- 3
+kmeans.k3 <- kmeans(churn.features, centers=k, iter.max=10, nstart=10)
+```
+
+```{r kmeans k3 clusters, echo=FALSE}
+churn.kmeans.labels1 <- kmeans.k3$cluster
+churn.kmeans.labels2 <- kmeans.k3$cluster
+churn.kmeans.labels3 <- kmeans.k3$cluster
+```
+At the below plot, we see clusters for k=3. On the contrary for previous results now there are two visible groups. As we can see in the table of labels, the bigger cluster was essentially cut in two. 
+
+```{r kmeans plot 3, echo=FALSE, fig.width=4, fig.height=4}
+plot(churn.features$Day.Mins, churn.features$Eve.Mins, col=churn.kmeans.labels1, pch=as.numeric(data$Churn.))
+title ("k-means clustering \n color -  k-means labels, symbol - real class labels")
+```
+
+In terms of classification we can't really match labels as before, but we decided to check if in any of the created groups, one identify a significant number of churn instances. 
+Here are the results:
+```{r 3clusters table, echo=FALSE}
+table(churn.kmeans.labels1)
+```
+
+So first we check how many churn were identified correctly in the first cluster.
+```{r change 2, echo=FALSE}
+# dobrze 75 z 842
+churn.kmeans.labels2[churn.kmeans.labels2 == 2] <- 3
+churn.kmeans.labels2[churn.kmeans.labels2 == 1] <- 2
+```
+
+```{r iledobrze2, echo=FALSE}
+sum(churn.kmeans.labels2==as.numeric(data$Churn.))
+```
+In the first group from 1194 cases only 249 were correctly identify as churn.
+```{r change 1, echo=FALSE}
+# dobrze 2 z 1235
+churn.kmeans.labels1[churn.kmeans.labels1 == 1] <- 3
+```
+
+```{r iledobrze, echo=FALSE}
+sum(churn.kmeans.labels1==as.numeric(data$Churn.))
+```
+In the second cluster from 858 cases only 79 were correctly identified.
+```{r change 3, echo=FALSE}
+# dobrze 205 z 1256
+churn.kmeans.labels3[churn.kmeans.labels3 == 1] <- 4
+churn.kmeans.labels3[churn.kmeans.labels3 == 2] <- 4
+churn.kmeans.labels3[churn.kmeans.labels3 == 3] <- 2
+```
+
+```{r iledobrze3, echo=FALSE}
+sum(churn.kmeans.labels3==as.numeric(data$Churn.))
+```
+And in the third group 155 cases from 1281 were identified correctly.
+
+The most correct prediction we get in first group, but as the cluster is big we can't decide for it to be a group of churning clients as it will assign a lot of wrong labels to not churning clients. In fact, in each case the percentage isn't high enough (approximately 10-20%) to do so.
+
+### PAM - Partitioning Around Medoids
+
+```{r PAM}
+churn.DissimilarityMatrix <- daisy(churn.features)
+churn.DissimilarityMatrix.mat <- as.matrix(churn.DissimilarityMatrix)
+churn.pam3 <- pam(x=churn.DissimilarityMatrix.mat, diss=TRUE, k=2)
+churn.pam.labels <- churn.pam3$clustering
+```
+
+```{r PAM plot, echo=FALSE, fig.width=4, fig.height=4}
+plot(churn.features$Day.Mins, churn.features$Eve.Mins, col=churn.pam.labels, pch=as.numeric(data$Churn.))
+title ("PAM clustering \n color -  PAM labels, symbol - real class labels")
+```
+
+
+```{r accu check PAM, echo=FALSE}
+(tab <- table(churn.pam3$clustering, as.numeric(data$Churn.)))
+matchClasses(tab, method="exact")
+compareMatchedClasses(churn.pam3$clustering, as.numeric(data$Churn.), method="exact")$diag
+```
+Creating clusters with PAM method gives us very similar results as k-means method. With k=2 the proportion of size of cluster is almost the same and the accuracy of is also 63%. The two groups are on top of each other with no visible distinction between them.
+
+### AGNES - Agglomerative Nesting (Hierarchical Clustering)
+We also preformed hierarchical clustering using agglomerative nesting. The chosen linkage method was complete, as others essentially gave only one cluster.
+```{r agens gen}
+agnes.res <- agnes(churn.features, method="complete")
+agnes.partition <- cutree(agnes.res, k=2)
+```
+
+```{r agnes clu plot, echo=FALSE, fig.width=4, fig.height=4}
+plot(churn.features$Day.Mins, churn.features$Eve.Mins, col=agnes.partition, pch=as.numeric(data$Churn.))
+title ("AGNES clustering \n color -  AGNES labels, symbol - real class labels")
+```
+
+```{r agens comapre, echo=FALSE}
+agnes.partition <- cutree(agnes.res, k=2)
+(tab <- table(agnes.partition, as.numeric(data$Churn.)))
+matchClasses(tab, method="exact")
+compareMatchedClasses(agnes.partition, as.numeric(data$Churn.), method="exact")$diag
+```
+In that case, the proportion of labels changed and are more similar to the real ones. The accuracy is improved and equals around 70%. However, it still not the kind of classification we hoped for. The percentage of correctly identified churn cases is equaled only around 10%, which is actually smaller than in k-means method. Checking that in reference to the size of the cluster as we did with k=3, we only get 7%, when before it was around 6%.
+
+## Silhouette
+As our results were very much not satisfactory when it comes to predicting our real labels, we also preformed internal validation of used clustering algorithms. For that purpose, silhouette plots were created.
+
+```{r silu kmean2, echo=FALSE, fig.width=5, fig.height=5}
+sil.kmeans <- silhouette(kmeans.k2$cluster, dist(churn.features))
+fviz_silhouette(sil.kmeans, xlab="k means, k=2")
+```
+\newpage
+```{r silu kmean3, echo=FALSE, fig.width=5, fig.height=5}
+sil.kmeans3 <- silhouette(kmeans.k3$cluster, dist(churn.features))
+fviz_silhouette(sil.kmeans3, xlab="k means, k=3")
+```
+\newpage
+```{r silu PAM, echo=FALSE, fig.width=5, fig.height=5}
+sil.pam <- silhouette(churn.pam3$clustering, dist(churn.features))
+fviz_silhouette(sil.pam, xlab="PAM, k=2")
+```
+
+```{r silu agnes, echo=FALSE, fig.width=4, fig.height=4}
+sil.agnes <- silhouette(agnes.partition, dist(churn.features))
+fviz_silhouette(sil.agnes, xlab="AGNES")
+```
+
+
+In each case, the average silhouette width is small - around 0.1-0.2 (with 1 being perfect). In that case, the agnes method actually preformed the worst, while having the best accuracy of predictions. The width for 3 clusters is actually worse than for 2 clusters in k-means method, even though 3 was supposed to be the optimal number.
+
+## PCA - Principal Component Analysis
+To hopefully improve the outcome of foregoing analysis, we preformed dimension reduction using Principal Component Analysis.
+For that purpose, we use all numerical features, not only those we chose for classification in part 1. Here is the importance of components created by PCA:
+```{r PCA dataframe, echo=FALSE}
+data.selected <- data[,c(2, 8:20)]
+churn.pca <- prcomp(data.selected, center = TRUE, scale. = TRUE, retx=TRUE)
+summary(churn.pca)
+churn.transform = as.data.frame(-churn.pca$x[,1:2])
+```
+The two best components have cumulative proportion of variance is equal to 29%, which isn't a lot. Most components have a proportion of either around 14% or 7%.
+
+## k-mean with PCA
+
+```{r PCA kmeans, echo=FALSE}
+k <- 2
+kmeans.k2 <- kmeans(churn.transform, centers=k, iter.max=10, nstart=10)
+churn.kmeans.labels <- kmeans.k2$cluster
+```
+
+```{r PCA kmenas plot, echo=FALSE, fig.width=4, fig.height=4}
+plot(churn.transform[,1], churn.transform[,2], col=churn.kmeans.labels, pch=as.numeric(data$Churn.))
+title ("k-means clustering after PCA \n color - k-means labels, symbol - real class labels")
+```
+
+```{r pca kmeans comapre, echo=FALSE}
+(tab <- table(kmeans.k2$cluster, as.numeric(data$Churn.)))
+matchClasses(tab, method="exact")
+compareMatchedClasses(kmeans.k2$cluster, as.numeric(data$Churn.), method="exact")$diag
+```
+
+## PAM with PCA
+
+```{r PCA PAM, echo=FALSE}
+churn.DissimilarityMatrix <- daisy(churn.transform)
+churn.DissimilarityMatrix.mat <- as.matrix(churn.DissimilarityMatrix)
+churn.pam3 <- pam(x=churn.DissimilarityMatrix.mat, diss=TRUE, k=2)
+churn.pam.labels <- churn.pam3$clustering
+```
+
+```{r PCA PAM plot, echo=FALSE, fig.width=4, fig.height=4}
+plot(churn.transform[,1], churn.transform[,2], col=churn.pam.labels, pch=as.numeric(data$Churn.))
+title ("PAM clustering after PCA \n color - k-means labels, symbol - real class labels")
+```
+
+
+```{r pca PAM comapre, echo=FALSE}
+(tab <- table(churn.pam3$clustering, as.numeric(data$Churn.)))
+matchClasses(tab, method="exact")
+compareMatchedClasses(churn.pam3$clustering, as.numeric(data$Churn.), method="exact")$diag
+```
+
+
+We use PC1 and PC2 for clustering.
+Now we got visibly split data. The proportion is actually worse than when we didn't use PCA, as now it is simply divided in approximately half. The accuracy of prediction decreased to 52% for both k-means and PAM. The two methods give once again essentially the same outcome.
+
+## Silhouette for PCA data
+
+```{r silu kmeans PCA, echo=FALSE, fig.width=5, fig.height=5}
+sil.kmeans <- silhouette(kmeans.k2$cluster, dist(churn.transform))
+fviz_silhouette(sil.kmeans, xlab="k means, k=2")
+```
+\newpage
+```{r silu PAM pCA, echo=FALSE, fig.width=5, fig.height=5}
+sil.pam <- silhouette(churn.pam3$clustering, dist(churn.transform))
+fviz_silhouette(sil.pam, xlab="PAM, k=2")
+```
+
+
+For PCA the internal validation looks a little better, but the results are still bad. For both methods average silhouette width equals 0.31.
+
+
+
+## Summary
+The conducted analysis pretty clearly shows that the churn data aren't well suited for clustering. From the first look at data that was our suspicion, and it was confirmed. 
+In both classification and simple clustering, preformed methods failed to achieved good or even slightly satisfactory results. The groups created by clustering didn't divide clients into churn and not churn, which were our main goal. The internal validation also showed, clusters in general for this data aren't insightful, so trying to analyse created groups at a different angle will also probably be futile and a waste of time.
+
+
